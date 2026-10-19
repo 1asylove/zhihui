@@ -1,0 +1,28 @@
+openapi: 3.0.3
+info:
+  title: 文档上传解析接口
+  version: 0.1.0
+
+paths:
+  /documents/upload:
+    post:
+      summary: '上传文档并解析为纯文本'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary          # 二进制文件
+              required:
+                - file                    # file 参数必填
+      responses:
+        '200':
+          description: '返回解析结果'
+          content:
+            text/plain:
+              schema:
+                type: string
