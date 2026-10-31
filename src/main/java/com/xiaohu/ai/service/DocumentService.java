@@ -4,9 +4,6 @@ import com.xiaohu.ai.service.parser.DocumentParser;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -42,14 +39,5 @@ public class DocumentService {
         int dot = filename.lastIndexOf('.');
         // 没有点（比如文件名是 "abc"）就返回空字符串
         return (dot >= 0) ? filename.substring(dot + 1).toLowerCase() : "";
-    }
-
-    // 解析纯文本文件：直接按 UTF-8 读整个文件
-    private String parseTxt(File file) {
-        try {
-            return Files.readString(file.toPath(), StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return "读取失败：" + e.getMessage();
-        }
     }
 }
