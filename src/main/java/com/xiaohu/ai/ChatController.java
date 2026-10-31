@@ -1,5 +1,6 @@
 package com.xiaohu.ai;
 
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -16,7 +17,7 @@ public class ChatController {
     }
 
     @GetMapping("/chat")
-
+    @PreAuthorize("hasAuthority('chat:ask')")
         public String chat(@RequestParam String message){
 
 

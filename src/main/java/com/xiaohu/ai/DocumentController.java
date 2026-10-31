@@ -1,5 +1,8 @@
 package com.xiaohu.ai;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import com.xiaohu.ai.service.DocumentService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,6 +32,7 @@ public class DocumentController {
     }
 
     @PostMapping("/upload")
+    @PreAuthorize("hasAuthority('doc:upload')")
     public String upload(@RequestParam("file") MultipartFile file) throws Exception {
         // 1. 检查是不是空文件
         if (file.isEmpty()) {
@@ -52,4 +56,16 @@ public class DocumentController {
         String text = documentService.parse(dest);
         return "上传成功：" + filename + "\n解析结果：\n" + text;
     }
+    @DeleteMapping("/{filename}")
+    @PreAuthorize("hasAuthority('doc:delete')")
+    public String delete(@PathVariable String filename) throws Exception {
+        Path path = Paths.get(uploadDir).resolve(filename);
+        if (Files.deleteIfExists(path)) {
+            return "已删除：" + filename;
+        }
+        return "文件不存在：" + filename;
+    }
+
+
+
 }
