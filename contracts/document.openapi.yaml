@@ -42,6 +42,12 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '413':
+          description: 文件超过 20MB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
 
   /documents:
     get:
@@ -88,6 +94,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ResultDocumentDetail'
+        '400':
+          description: id 不是整数
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -102,6 +114,12 @@ paths:
       responses:
         '200':
           description: 删除成功（deleted 置 1）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '400':
+          description: id 不是整数
           content:
             application/json:
               schema:

@@ -93,7 +93,7 @@
 | `GET /documents/{id}` | 新增，返回含 `content` 的详情 |
 | `DELETE /documents/{filename}` | **路径参数由 `filename` 改为 `id`**：文件名可重复、可被改写，id 才唯一稳定；响应由纯文本改为 `Result<Void>` |
 
-统一响应沿用 `Result<T>`（`code` / `message` / `data`）；错误码：401 未登录、403 缺少权限、404 记录不存在。
+统一响应沿用 `Result<T>`（`code` / `message` / `data`）；错误码：400 参数格式错误、401 未登录、403 缺少权限、404 记录不存在、413 文件超过 20MB。
 
 契约变更后需同步更新 Apifox 中的接口定义。
 
