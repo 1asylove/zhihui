@@ -18,7 +18,7 @@ public class DocxParser implements DocumentParser {
             return new XWPFWordExtractor(document).getText();
 
         }catch (Exception e){
-            return "解析失败";
+            throw new RuntimeException("解析失败：" + e.getMessage(), e);
         }
     }
 

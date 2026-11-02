@@ -1,12 +1,18 @@
 openapi: 3.0.3
 info:
-  title: 文档上传解析接口
-  version: 0.1.0
+  title: 文档入库与治理接口
+  version: 0.2.0
+  description: 「智汇」平台文档上传落库、列表、详情与逻辑删除
+
+servers:
+  - url: http://localhost:8080
 
 paths:
   /documents/upload:
     post:
-      summary: '上传文档并解析为纯文本'
+      summary: 上传文档并落库（需要 doc:upload 权限）
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -21,30 +27,227 @@ paths:
                 - file
       responses:
         '200':
-          description: '返回解析结果'
+          description: 返回文档记录，status 为 SUCCESS 或 FAILED
           content:
-            text/plain:
+            application/json:
               schema:
-                type: string
+                $ref: '#/components/schemas/ResultDocument'
+        '400':
+          description: 文件为空或类型不支持
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
-  /documents/{filename}:
-    delete:
-      summary: 删除已上传文档（需要 doc:delete 权限）
+  /documents:
+    get:
+      summary: 分页查询文档列表（不含正文）
+      security:
+        - bearerAuth: []
       parameters:
-        - name: filename
-          in: path
-          required: true
+        - name: page
+          in: query
+          required: false
           schema:
-            type: string
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
       responses:
         '200':
-          description: 删除结果
+          description: 分页结果，按创建时间倒序；ADMIN 看全部，USER 只看自己的
           content:
-            text/plain:
+            application/json:
               schema:
-                type: string
-              example: 已删除：t2.txt
+                $ref: '#/components/schemas/ResultPageDocument'
         '401':
-          description: 未登录或 token 失效
+          $ref: '#/components/responses/Unauthorized'
+
+  /documents/{id}:
+    get:
+      summary: 查询文档详情（含正文）
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: 文档详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultDocumentDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      summary: 逻辑删除文档（需要 doc:delete 权限，物理文件保留）
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+      responses:
+        '200':
+          description: 删除成功（deleted 置 1）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '403':
-          description: 缺少 doc:delete 权限
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 登录接口返回的 JWT，格式为 `Bearer <token>`
+
+  parameters:
+    DocumentId:
+      name: id
+      in: path
+      required: true
+      description: 文档主键 id（不是文件名）
+      schema:
+        type: integer
+        format: int64
+        example: 1
+
+  responses:
+    Unauthorized:
+      description: 未登录或 token 失效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Result'
+    Forbidden:
+      description: 已登录但缺少权限点
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Result'
+    NotFound:
+      description: 文档不存在或已删除
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Result'
+
+  schemas:
+    Result:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: 请求成功
+        data:
+          type: object
+          nullable: true
+
+    DocumentVO:
+      type: object
+      description: 列表项，不含正文
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        fileName:
+          type: string
+          example: 员工手册.txt
+        fileType:
+          type: string
+          example: txt
+        fileSize:
+          type: integer
+          format: int64
+          example: 1024
+        status:
+          type: string
+          enum: [PENDING, PARSING, SUCCESS, FAILED]
+          example: SUCCESS
+        errorMsg:
+          type: string
+          nullable: true
+          example: 解析失败：文件已损坏
+        createTime:
+          type: string
+          format: date-time
+          example: '2026-11-02T10:00:00'
+
+    DocumentDetailVO:
+      allOf:
+        - $ref: '#/components/schemas/DocumentVO'
+        - type: object
+          properties:
+            content:
+              type: string
+              description: 解析出的正文，详情接口才返回
+              example: 员工手册第一章……
+
+    PageDocument:
+      type: object
+      properties:
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocumentVO'
+        total:
+          type: integer
+          format: int64
+          example: 42
+        current:
+          type: integer
+          example: 1
+        size:
+          type: integer
+          example: 10
+        pages:
+          type: integer
+          example: 5
+
+    ResultDocument:
+      allOf:
+        - $ref: '#/components/schemas/Result'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/DocumentVO'
+
+    ResultDocumentDetail:
+      allOf:
+        - $ref: '#/components/schemas/Result'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/DocumentDetailVO'
+
+    ResultPageDocument:
+      allOf:
+        - $ref: '#/components/schemas/Result'
+        - type: object
+          properties:
+            data:
+              $ref: '#/components/schemas/PageDocument'

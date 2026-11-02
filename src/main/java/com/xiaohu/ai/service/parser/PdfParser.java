@@ -17,8 +17,7 @@ public class PdfParser implements DocumentParser {
             return stripper.getText(pdf);
 
         }catch (Exception e){
-            return  "解析失败";
-
+            throw new RuntimeException("解析失败：" + e.getMessage(), e);
         }
 
     }

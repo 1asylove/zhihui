@@ -14,7 +14,7 @@ public class TxtParser implements DocumentParser {
         try {
             return Files.readString(file.toPath(), StandardCharsets.UTF_8);
         } catch (Exception e) {
-            return "读取失败：" + e.getMessage();
+            throw new RuntimeException("解析失败：" + e.getMessage(), e);
         }
     }
 
