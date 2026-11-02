@@ -1,0 +1,158 @@
+openapi: 3.0.3
+info:
+  title: 鉴权与权限接口
+  version: 0.1.0
+  description: 「智汇」平台的注册、登录与当前用户权限查询
+
+servers:
+  - url: http://localhost:8080
+
+paths:
+  /auth/register:
+    post:
+      summary: 用户注册
+      security: []                 # 空数组 = 覆盖全局鉴权，这个接口公开
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultString'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/login:
+    post:
+      summary: 登录并签发 JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登录成功，data 为 JWT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultString'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /me:
+    get:
+      summary: 查询当前用户的角色与权限点（调试用）
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 当前用户的 authorities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Authority'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 登录接口返回的 JWT，格式为 `Bearer <token>`
+
+  responses:
+    Unauthorized:
+      description: 未登录或 token 失效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Result'
+    Forbidden:
+      description: 已登录但缺少权限点
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Result'
+    BadRequest:
+      description: 参数校验失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Result'
+    # TODO 1：描述参数校验失败。description 写清楚，content 用 application/json + Result
+    # 提示：Body 里的 code 实际是 Spring 默认的 400，message 里带校验错误
+
+  schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: test1
+        password:
+          type: string
+          example: '123456'
+
+    RegisterRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 20
+          example: test2
+        password:
+          type: string
+          minLength: 6
+          maxLength: 20
+          example: '123456'
+        nickname:
+          type: string
+          example: 普通用户
+
+    Authority:
+      type: object
+      properties:
+        authority:
+          type: string
+          example: ROLE_ADMIN
+
+    Result:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: 请求成功
+        data:
+          type: object
+          nullable: true
+    # TODO 2：三个字段 code(int)、message(string)、data(nullable)
+    # 提示：data 在 3.0 里写 type: object + nullable: true 即可
+
+    ResultString:
+      allOf:
+        - $ref: '#/components/schemas/Result'
+        - type: object
+          properties:
+            data:
+              type: string
+    # TODO 3：用 allOf 组合「Result 的全部字段」+「data 是 string」
+    # 提示：allOf 第二个元素写 properties.data: {type: string}

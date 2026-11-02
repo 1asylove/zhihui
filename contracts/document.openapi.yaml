@@ -16,9 +16,9 @@ paths:
               properties:
                 file:
                   type: string
-                  format: binary          # 二进制文件
+                  format: binary
               required:
-                - file                    # file 参数必填
+                - file
       responses:
         '200':
           description: '返回解析结果'
@@ -26,3 +26,25 @@ paths:
             text/plain:
               schema:
                 type: string
+
+  /documents/{filename}:
+    delete:
+      summary: 删除已上传文档（需要 doc:delete 权限）
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 删除结果
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: 已删除：t2.txt
+        '401':
+          description: 未登录或 token 失效
+        '403':
+          description: 缺少 doc:delete 权限
