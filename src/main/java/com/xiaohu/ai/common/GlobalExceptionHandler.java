@@ -20,4 +20,14 @@ public class GlobalExceptionHandler {
     public Result<Void> handleRuntimeException(RuntimeException e) {
         return Result.error(500, e.getMessage());
     }
+
+    @ExceptionHandler(BizException.class)
+    public ResponseEntity<Result<Void>> handleBiz(BizException e) {
+        HttpStatus status = HttpStatus.resolve(e.getCode());
+        if (status == null) {
+            status = HttpStatus.BAD_REQUEST;
+        }
+        return ResponseEntity.status(status)
+                .body(Result.error(e.getCode(), e.getMessage()));
+    }
 }

@@ -1,10 +1,18 @@
 package com.xiaohu.ai.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.xiaohu.ai.common.BizException;
 import com.xiaohu.ai.common.DocumentStatus;
+import com.xiaohu.ai.common.PageResult;
+import com.xiaohu.ai.dto.DocumentDetailVO;
+import com.xiaohu.ai.dto.DocumentVO;
 import com.xiaohu.ai.entity.Document;
 import com.xiaohu.ai.mapper.DocumentMapper;
 import com.xiaohu.ai.service.parser.DocumentParser;
 import org.springframework.stereotype.Service;
+
 
 import java.io.File;
 import java.time.LocalDateTime;
@@ -111,5 +119,74 @@ public class DocumentService {
         doc.setStatus(status);
         doc.setUpdateTime(LocalDateTime.now());
         documentMapper.updateById(doc);
+    }
+
+    /** 分页查询：uploaderId 为 null 表示管理员看全量 */
+    public PageResult<DocumentVO> page(int page, int size, Long uploaderId) {
+        Page<Document> p = new Page<>(page, size);
+        LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
+                // 列裁剪：不查 content / file_path / update_time
+                .select(Document::getId, Document::getFileName, Document::getFileType,
+                        Document::getFileSize, Document::getStatus, Document::getErrorMsg,
+                        Document::getCreateTime)
+                .eq(Document::getDeleted, 0)
+                // 条件生效重载：uploaderId 为 null 时该条件不参与 SQL
+                .eq(uploaderId != null, Document::getUploaderId, uploaderId)
+                .orderByDesc(Document::getCreateTime)
+                .orderByDesc(Document::getId);   // 时间相同再按 id 兜底，保证翻页稳定
+
+        documentMapper.selectPage(p, wrapper);
+
+        List<DocumentVO> records = p.getRecords().stream().map(this::toVO).toList();
+        return new PageResult<>(records, p.getTotal(), p.getCurrent(), p.getSize(), p.getPages());
+    }
+
+    /** 详情：不存在 / 已删除 / 不可见 一律 404 */
+    public DocumentDetailVO detail(Long id, Long uploaderId) {
+        LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
+                .eq(Document::getId, id)
+                .eq(Document::getDeleted, 0)
+                .eq(uploaderId != null, Document::getUploaderId, uploaderId);
+
+        Document d = documentMapper.selectOne(wrapper);
+        if (d == null) {
+            throw new BizException(404, "文档不存在或已删除");
+        }
+        return toDetailVO(d);
+    }
+
+    /** 逻辑删除：返回 false 表示记录不存在或已删过 */
+    public boolean logicalDelete(Long id) {
+        Document patch = new Document();
+        patch.setDeleted(1);
+        patch.setUpdateTime(LocalDateTime.now());
+
+        return documentMapper.update(patch, new LambdaUpdateWrapper<Document>()
+                .eq(Document::getId, id)
+                .eq(Document::getDeleted, 0)) > 0;
+    }
+
+    // 两个 VO 共享一套字段赋值，避免 setter 复制两遍
+    private void fill(DocumentVO vo, Document d) {
+        vo.setId(d.getId());
+        vo.setFileName(d.getFileName());
+        vo.setFileType(d.getFileType());
+        vo.setFileSize(d.getFileSize());
+        vo.setStatus(d.getStatus());
+        vo.setErrorMsg(d.getErrorMsg());
+        vo.setCreateTime(d.getCreateTime());
+    }
+
+    public DocumentVO toVO(Document d) {
+        DocumentVO vo = new DocumentVO();
+        fill(vo, d);
+        return vo;
+    }
+
+    private DocumentDetailVO toDetailVO(Document d) {
+        DocumentDetailVO vo = new DocumentDetailVO();
+        fill(vo, d);
+        vo.setContent(d.getContent());
+        return vo;
     }
 }

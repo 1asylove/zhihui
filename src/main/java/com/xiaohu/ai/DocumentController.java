@@ -1,7 +1,10 @@
 package com.xiaohu.ai;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.xiaohu.ai.common.BizException;
+import com.xiaohu.ai.common.PageResult;
 import com.xiaohu.ai.common.Result;
+import com.xiaohu.ai.dto.DocumentDetailVO;
 import com.xiaohu.ai.dto.DocumentVO;
 import com.xiaohu.ai.entity.Document;
 import com.xiaohu.ai.entity.User;
@@ -9,14 +12,10 @@ import com.xiaohu.ai.mapper.UserMapper;
 import com.xiaohu.ai.service.DocumentService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.StringUtils;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -97,30 +96,56 @@ public class DocumentController {
             documentService.markFailed(id, e.getMessage());
         }
 
-        return Result.success(toVO(documentService.getById(id)));
+        return Result.success(documentService.toVO(documentService.getById(id)));
     }
 
-    // 暂时保留按文件名的删除实现，Step 4 再改为按 id 逻辑删除
-    @DeleteMapping("/{filename}")
+    @GetMapping
+    public Result<PageResult<DocumentVO>> list(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int size) {
+
+        // 契约要求 page >= 1、1 <= size <= 100，越界直接夹紧而不报错
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+
+        User user = currentUser();
+        Long uploaderId = isAdmin() ? null : user.getId();
+
+        return Result.success(documentService.page(safePage, safeSize, uploaderId));
+    }
+
+    @GetMapping("/{id}")
+    public Result<DocumentDetailVO> detail(@PathVariable Long id) {
+        User user = currentUser();
+        Long uploaderId = isAdmin() ? null : user.getId();
+
+        return Result.success(documentService.detail(id, uploaderId));
+    }
+
+    @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('doc:delete')")
-    public String delete(@PathVariable String filename) throws Exception {
-        Path path = Paths.get(uploadDir).resolve(filename);
-        if (Files.deleteIfExists(path)) {
-            return "已删除：" + filename;
+    public Result<Void> delete(@PathVariable Long id) {
+        if (!documentService.logicalDelete(id)) {
+            throw new BizException(404, "文档不存在或已删除");
         }
-        return "文件不存在：" + filename;
+        return Result.success("删除成功", null);
     }
 
-    // 实体 → VO：列表视图不暴露正文
-    private DocumentVO toVO(Document d) {
-        DocumentVO vo = new DocumentVO();
-        vo.setId(d.getId());
-        vo.setFileName(d.getFileName());
-        vo.setFileType(d.getFileType());
-        vo.setFileSize(d.getFileSize());
-        vo.setStatus(d.getStatus());
-        vo.setErrorMsg(d.getErrorMsg());
-        vo.setCreateTime(d.getCreateTime());
-        return vo;
+    /** 当前登录用户实体（JWT 只存用户名，需要回库拿 id） */
+    private User currentUser() {
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        User user = userMapper.selectOne(
+                new LambdaQueryWrapper<User>().eq(User::getUsername, username));
+        if (user == null) {
+            throw new BizException(500, "当前用户不存在");
+        }
+        return user;
+    }
+
+    /** 角色判断：权限里装的是 ROLE_ADMIN，不是 ADMIN */
+    private boolean isAdmin() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
     }
 }
