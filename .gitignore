@@ -53,3 +53,9 @@ Thumbs.db
 HANDOFF.md
 MIGRATION_PLAN.md
 PROGRESS.md
+
+### Python ###
+python/.venv/
+__pycache__/
+*.pyc
+.env

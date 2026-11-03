@@ -1,0 +1,123 @@
+openapi: 3.0.3
+info:
+  title: 向量化内部接口
+  version: 0.1.0
+  description: |
+    Java 侧调用 Python 服务的内部契约：文本切片 -> 向量。
+    该服务只在内网调用（Java 后端 -> Python 服务），不面向终端用户，因此不使用 JWT，
+    而由部署层网络隔离（Docker 网络 / localhost 端口不对公网开放）保证安全。
+
+servers:
+  - url: http://localhost:8000
+
+paths:
+  /internal/health:
+    get:
+      summary: 健康检查
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  model:
+                    type: string
+                    example: BAAI/bge-m3
+
+  /internal/vectorize:
+    post:
+      summary: 把一批文本转成向量
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VectorizeRequest'
+      responses:
+        '200':
+          description: 向量结果，vectors 与 texts 顺序一一对应
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VectorizeResponse'
+        '400':
+          description: texts 为空或超过单批上限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: 请求体结构不合法（如缺少 texts 字段）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: 服务端配置缺失（如未设置 SILICONFLOW_API_KEY）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '502':
+          description: 上游 Embedding 服务调用失败或返回维度异常
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    VectorizeRequest:
+      type: object
+      required:
+        - texts
+      properties:
+        texts:
+          type: array
+          minItems: 1
+          maxItems: 32
+          description: 待向量化文本，单批最多 32 条（与 SiliconFlow 限制一致）
+          items:
+            type: string
+          example:
+            - "第一段测试文本"
+            - "第二段测试文本"
+        model:
+          type: string
+          description: 可选覆盖默认模型，缺省使用服务端 EMBEDDING_MODEL
+          example: BAAI/bge-m3
+
+    VectorizeResponse:
+      type: object
+      required:
+        - model
+        - dimension
+        - vectors
+      properties:
+        model:
+          type: string
+          example: BAAI/bge-m3
+        dimension:
+          type: integer
+          description: 向量维度，bge-m3 为 1024
+          example: 1024
+        vectors:
+          type: array
+          description: 与请求 texts 顺序一一对应
+          items:
+            type: array
+            items:
+              type: number
+              format: float
+
+    Error:
+      type: object
+      properties:
+        detail:
+          type: string
+          example: texts 不能为空
