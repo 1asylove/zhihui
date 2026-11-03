@@ -9,7 +9,10 @@ import com.xiaohu.ai.dto.DocumentVO;
 import com.xiaohu.ai.entity.Document;
 import com.xiaohu.ai.entity.User;
 import com.xiaohu.ai.mapper.UserMapper;
+import com.xiaohu.ai.service.ChunkService;
 import com.xiaohu.ai.service.DocumentService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -28,16 +31,22 @@ import java.util.UUID;
 @RequestMapping("/documents")
 public class DocumentController {
 
+  
+    private static final Logger log = LoggerFactory.getLogger(DocumentController.class);
+
     // 从配置文件读上传目录（绝对路径）
     @Value("${upload.dir}")
     private String uploadDir;
 
     private final DocumentService documentService;
     private final UserMapper userMapper;
+    private final ChunkService chunkService;
 
-    public DocumentController(DocumentService documentService, UserMapper userMapper) {
+    public DocumentController(DocumentService documentService, UserMapper userMapper,
+                              ChunkService chunkService) {
         this.documentService = documentService;
         this.userMapper = userMapper;
+        this.chunkService = chunkService;
     }
 
     @PostMapping("/upload")
@@ -94,6 +103,14 @@ public class DocumentController {
             documentService.markSuccess(id, text);
         } catch (Exception e) {
             documentService.markFailed(id, e.getMessage());
+        }
+
+        // 8. 切片落库（仅切片，向量化在 Step 3）；失败不影响上传结果
+        try {
+            int count = chunkService.sliceAndSave(documentService.getById(id));
+            log.info("文档 {} 切片完成，共 {} 片", id, count);
+        } catch (Exception e) {
+            log.warn("文档 {} 切片失败：{}", id, e.getMessage());
         }
 
         return Result.success(documentService.toVO(documentService.getById(id)));
