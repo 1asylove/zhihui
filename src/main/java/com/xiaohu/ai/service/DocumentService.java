@@ -155,6 +155,13 @@ public class DocumentService {
         return toDetailVO(d);
     }
 
+    /** 是否存在未删除的文档（删除链路第一段判断） */
+    public boolean existsActive(Long id) {
+        return documentMapper.selectCount(new LambdaQueryWrapper<Document>()
+                .eq(Document::getId, id)
+                .eq(Document::getDeleted, 0)) > 0;
+    }
+
     /** 逻辑删除：返回 false 表示记录不存在或已删过 */
     public boolean logicalDelete(Long id) {
         Document patch = new Document();

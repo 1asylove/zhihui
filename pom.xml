@@ -134,6 +134,12 @@
         </dependency>
 
 
+        <!-- Milvus Java SDK：向量写入与检索 -->
+        <dependency>
+            <groupId>io.milvus</groupId>
+            <artifactId>milvus-sdk-java</artifactId>
+            <version>2.4.9</version>
+        </dependency>
 
 
     </dependencies>
