@@ -52,7 +52,7 @@ public class MilvusService {
 
     /**
      * 首次用到时才建连接：构造器只存配置，Milvus 不在线不会拖垮应用启动。
-     * 连接超时压到 3 秒，避免上传请求被 SDK 默认的 10 秒等待卡住。
+     * 连接超时 15 秒：Zilliz Cloud Serverless 有冷启动，3 秒在跨洋链路上容易误判失败。
      */
     private synchronized MilvusServiceClient client() {
         if (client != null) {
@@ -60,7 +60,7 @@ public class MilvusService {
         }
         ConnectParam.Builder builder = ConnectParam.newBuilder()
                 .withUri(uri)
-                .withConnectTimeout(3, TimeUnit.SECONDS);
+                .withConnectTimeout(15, TimeUnit.SECONDS);
         if (token != null && !token.isBlank()) {
             builder.withToken(token);
         }
