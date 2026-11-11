@@ -4,11 +4,14 @@ import java.util.List;
 
 /**
  * 检索响应：hits 按 score 降序，无命中时为空列表而不是 404。
+ * mode 为实际使用的检索模式，reranked 表示是否经过精排。
  */
 public class SearchResponse {
 
     private String query;
     private Integer topK;
+    private String mode;
+    private Boolean reranked;
     private Long tookMs;
     private List<SearchHitVO> hits;
 
@@ -17,6 +20,12 @@ public class SearchResponse {
 
     public Integer getTopK() { return topK; }
     public void setTopK(Integer topK) { this.topK = topK; }
+
+    public String getMode() { return mode; }
+    public void setMode(String mode) { this.mode = mode; }
+
+    public Boolean getReranked() { return reranked; }
+    public void setReranked(Boolean reranked) { this.reranked = reranked; }
 
     public Long getTookMs() { return tookMs; }
     public void setTookMs(Long tookMs) { this.tookMs = tookMs; }

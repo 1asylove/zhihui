@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 知识检索接口：M4 Step1，只检索不生成。
+ * 知识检索接口：M4 Step1 基础检索、Step5 混合检索 + Rerank。
  * 契约见 contracts/search.openapi.yaml。
  */
 @RestController
@@ -37,8 +37,8 @@ public class SearchController {
             throw new BizException(400, "请求体不能为空");
         }
         User user = currentUser();
-        return Result.success(
-                searchService.search(req.getQuery(), req.getTopK(), user.getId(), isAdmin()));
+        return Result.success(searchService.search(req.getQuery(), req.getTopK(),
+                user.getId(), isAdmin(), req.getMode()));
     }
 
     /** 当前登录用户实体（JWT 只存用户名，需要回库拿 id） */

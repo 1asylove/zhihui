@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: 知识检索接口
   version: 0.1.0
-  description: 「智汇」平台 RAG 检索：问题向量化 → Milvus TopK → 回表带来源的引用片段
+  description: 「智汇」平台 RAG 检索：向量召回 + 关键词召回 → RRF 融合 → Rerank 精排
 
 servers:
   - url: http://localhost:8080
@@ -10,12 +10,15 @@ servers:
 paths:
   /search:
     post:
-      summary: 语义检索（需要 chat:ask 权限）
+      summary: 知识检索（需要 chat:ask 权限）
       description: |
-        把 query 转成 bge-m3 向量，在 zhihui_chunk 中做 COSINE TopK 检索，
-        回表校验 document.deleted=0 后返回带来源的片段。
-        ADMIN 检索全量，USER 只检索自己上传的文档。
-        无命中返回 200 + 空数组，不返回 404。
+        三种模式（请求 mode 可覆盖，缺省取 search.mode）：
+        - vector：bge-m3 向量化 → Milvus COSINE TopN
+        - keyword：MySQL ngram 全文索引 TopN
+        - hybrid（默认）：两路召回 → RRF 融合 → bge-reranker-v2-m3 精排
+        向量与关键词均按权限过滤：ADMIN 全量，USER 仅自己上传的文档。
+        无命中返回 200 + 空数组，不返回 404；rerank 失败自动降级为融合排序
+        （响应 reranked=false），不影响主流程。
       security:
         - bearerAuth: []
       requestBody:
@@ -32,7 +35,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ResultSearchResponse'
         '400':
-          description: query 为空 / 超长 / 请求体缺失
+          description: query 为空 / 超长 / mode 非法 / 请求体缺失
           content:
             application/json:
               schema:
@@ -91,6 +94,10 @@ components:
           minimum: 1
           maximum: 20
           default: 5
+        mode:
+          type: string
+          enum: [vector, keyword, hybrid]
+          description: 检索模式，缺省取 search.mode（默认 hybrid）
 
     SearchHit:
       type: object
@@ -108,7 +115,9 @@ components:
         score:
           type: number
           format: double
-          description: COSINE 相似度，仅用于排序与展示，不用于过滤
+          description: |
+            排序分数，语义随模式变化：vector=余弦相似度；keyword=全文相关度；
+            hybrid 未精排=RRF 分；精排后=rerank relevance_score。仅用于排序与展示，不用于过滤
           example: 0.5984
         content:
           type: string
@@ -121,6 +130,13 @@ components:
           type: string
         topK:
           type: integer
+        mode:
+          type: string
+          enum: [vector, keyword, hybrid]
+          description: 实际使用的检索模式（hybrid 因关键词失败降级时返回 vector）
+        reranked:
+          type: boolean
+          description: 是否经过 rerank 精排；false 表示未开启或精排失败已降级
         tookMs:
           type: integer
           format: int64
