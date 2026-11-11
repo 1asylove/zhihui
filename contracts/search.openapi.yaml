@@ -1,0 +1,155 @@
+openapi: 3.0.3
+info:
+  title: 知识检索接口
+  version: 0.1.0
+  description: 「智汇」平台 RAG 检索：问题向量化 → Milvus TopK → 回表带来源的引用片段
+
+servers:
+  - url: http://localhost:8080
+
+paths:
+  /search:
+    post:
+      summary: 语义检索（需要 chat:ask 权限）
+      description: |
+        把 query 转成 bge-m3 向量，在 zhihui_chunk 中做 COSINE TopK 检索，
+        回表校验 document.deleted=0 后返回带来源的片段。
+        ADMIN 检索全量，USER 只检索自己上传的文档。
+        无命中返回 200 + 空数组，不返回 404。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: 检索结果（无命中时 hits 为空数组）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultSearchResponse'
+        '400':
+          description: query 为空 / 超长 / 请求体缺失
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '502':
+          description: 向量化服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '503':
+          description: 向量库（Milvus / Zilliz）不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: 未登录或 token 无效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Result'
+    Forbidden:
+      description: 无 chat:ask 权限
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Result'
+
+  schemas:
+    SearchRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          description: 用户问题，去首尾空白后不可为空，长度 ≤ search.max-query-length（默认 500）
+          example: 制度由哪个部门负责解释
+        topK:
+          type: integer
+          description: 返回条数，缺省 5，夹紧到 [1, 20]
+          minimum: 1
+          maximum: 20
+          default: 5
+
+    SearchHit:
+      type: object
+      properties:
+        documentId:
+          type: integer
+          format: int64
+          description: 来源文档 id
+        chunkIndex:
+          type: integer
+          description: 片段序号，从 0 开始
+        fileName:
+          type: string
+          description: 来源文件名（回表 document 取得）
+        score:
+          type: number
+          format: double
+          description: COSINE 相似度，仅用于排序与展示，不用于过滤
+          example: 0.5984
+        content:
+          type: string
+          description: 片段原文
+
+    SearchResponse:
+      type: object
+      properties:
+        query:
+          type: string
+        topK:
+          type: integer
+        tookMs:
+          type: integer
+          format: int64
+          description: 服务端检索总耗时（毫秒）
+        hits:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchHit'
+
+    ResultSearchResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          description: 200 成功；400 参数非法；502 向量化失败；503 向量库不可用
+          example: 200
+        message:
+          type: string
+          example: 成功
+        data:
+          allOf:
+            - $ref: '#/components/schemas/SearchResponse'
+
+    Result:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        data:
+          nullable: true

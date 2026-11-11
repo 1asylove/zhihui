@@ -198,6 +198,73 @@ public class MilvusService {
         return (long) wrapper.getFieldWrapper("count(*)").getFieldData().get(0);
     }
 
+    /**
+     * 跨文档语义检索。
+     *
+     * @param expr 过滤表达式，ADMIN 传 "document_id > 0"，USER 传 "uploader_id == {id}"
+     * @return 按 score 降序的命中列表；无命中返回空列表
+     */
+    public List<Hit> search(List<Float> queryVector, int topK, String expr) {
+        ensureReady();
+        R<SearchResults> r = client.search(SearchParam.newBuilder()
+                .withCollectionName(collection)
+                .withMetricType(MetricType.valueOf(metric))
+                .withConsistencyLevel(ConsistencyLevelEnum.BOUNDED)
+                .withExpr(expr)
+                .withTopK(topK)
+                .withOutFields(List.of("milvus_id", "document_id", "chunk_index", "content"))
+                .withVectors(List.of(queryVector))
+                .withVectorFieldName("vector")
+                .build());
+        check(r, "检索");
+
+        SearchResultsWrapper wrapper = new SearchResultsWrapper(r.getData().getResults());
+        // IDScore 与 RowRecord 按下标一一对应：第 i 个分数属于第 i 行
+        List<SearchResultsWrapper.IDScore> scores = wrapper.getIDScore(0);
+        List<QueryResultsWrapper.RowRecord> rows = wrapper.getRowRecords(0);
+        if (rows == null || rows.isEmpty()) {
+            return List.of();
+        }
+
+        List<Hit> hits = new ArrayList<>(rows.size());
+        for (int i = 0; i < rows.size(); i++) {
+            QueryResultsWrapper.RowRecord row = rows.get(i);
+            SearchResultsWrapper.IDScore score = scores.get(i);
+            hits.add(new Hit(
+                    score.getStrID(),
+                    // Milvus 返回的是 Number，Int64 可能是 Long、Int32 可能是 Integer，统一走 Number 转换
+                    ((Number) row.get("document_id")).longValue(),
+                    ((Number) row.get("chunk_index")).intValue(),
+                    (String) row.get("content"),
+                    // 2.4.9 的 getScore() 返回 float，显式提升为 double
+                    (double) score.getScore()));
+        }
+        return hits;
+    }
+
+    /** 检索命中：只暴露检索需要的字段，不把 gRPC 结构泄漏到 service 层 */
+    public static class Hit {
+        private final String milvusId;
+        private final Long documentId;
+        private final Integer chunkIndex;
+        private final String content;
+        private final Double score;
+
+        public Hit(String milvusId, Long documentId, Integer chunkIndex, String content, Double score) {
+            this.milvusId = milvusId;
+            this.documentId = documentId;
+            this.chunkIndex = chunkIndex;
+            this.content = content;
+            this.score = score;
+        }
+
+        public String getMilvusId() { return milvusId; }
+        public Long getDocumentId() { return documentId; }
+        public Integer getChunkIndex() { return chunkIndex; }
+        public String getContent() { return content; }
+        public Double getScore() { return score; }
+    }
+
     /** 检索冒烟：按文档内相似度取 topK（M4 会扩展为跨文档混合检索） */
     public List<Long> searchInDocument(Long documentId, List<Float> queryVector, int topK) {
         ensureReady();
