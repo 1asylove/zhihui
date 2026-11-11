@@ -1,6 +1,7 @@
 package com.xiaohu.ai;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xiaohu.ai.common.BizException;
 import com.xiaohu.ai.common.Result;
 import com.xiaohu.ai.dto.QaRequest;
@@ -8,12 +9,19 @@ import com.xiaohu.ai.dto.QaResponse;
 import com.xiaohu.ai.entity.User;
 import com.xiaohu.ai.mapper.UserMapper;
 import com.xiaohu.ai.service.QaService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
+
+import java.util.Map;
 
 /**
  * RAG 问答接口：M4 Step2，非流式。
@@ -22,12 +30,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class QaController {
 
+    private static final Logger log = LoggerFactory.getLogger(QaController.class);
+
     private final QaService qaService;
     private final UserMapper userMapper;
+    private final ObjectMapper objectMapper;
 
-    public QaController(QaService qaService, UserMapper userMapper) {
+    public QaController(QaService qaService, UserMapper userMapper, ObjectMapper objectMapper) {
         this.qaService = qaService;
         this.userMapper = userMapper;
+        this.objectMapper = objectMapper;
     }
 
     @PostMapping("/qa/ask")
@@ -39,6 +51,46 @@ public class QaController {
         User user = currentUser();
         return Result.success(
                 qaService.ask(req.getQuestion(), req.getTopK(), user.getId(), isAdmin()));
+    }
+
+    /**
+     * 流式问答：meta（引用）→ delta（增量文本）→ done；异常走 error 事件。
+     * 契约见 contracts/qa-stream.openapi.yaml。
+     */
+    @PostMapping(value = "/qa/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize("hasAuthority('chat:ask')")
+    public Flux<ServerSentEvent<String>> stream(@RequestBody(required = false) QaRequest req)
+            throws Exception {
+        if (req == null) {
+            throw new BizException(400, "请求体不能为空");
+        }
+        User user = currentUser();
+
+        // 校验 + 检索 + Prompt 组装仍在建流之前完成，失败时还能返回普通 JSON 错误
+        QaService.QaPrompt ctx = qaService.prepare(req.getQuestion(), req.getTopK(),
+                user.getId(), isAdmin());
+
+        ServerSentEvent<String> meta = event("meta",
+                objectMapper.writeValueAsString(Map.of("citations", ctx.citations())));
+
+        if (ctx.empty()) {
+            return Flux.just(meta,
+                    event("delta", QaService.NO_HIT_ANSWER),
+                    event("done", "[DONE]"));
+        }
+
+        Flux<ServerSentEvent<String>> deltas = qaService.streamAnswer(ctx.userPrompt())
+                .map(token -> event("delta", token))
+                .onErrorResume(e -> {
+                    log.warn("流式生成失败：{}", e.getMessage());
+                    return Flux.just(event("error", "{\"message\":\"模型调用失败，请稍后重试\"}"));
+                });
+
+        return Flux.concat(Flux.just(meta), deltas, Flux.just(event("done", "[DONE]")));
+    }
+
+    private static ServerSentEvent<String> event(String name, String data) {
+        return ServerSentEvent.<String>builder().event(name).data(data).build();
     }
 
     /** 当前登录用户实体（JWT 只存用户名，需要回库拿 id） */

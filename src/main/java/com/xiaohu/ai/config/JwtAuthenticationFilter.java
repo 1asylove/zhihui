@@ -24,6 +24,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this.jwtUtil = jwtUtil;
         this.userDetailsService = userDetailsService;
     }
+    /**
+     * SSE/异步请求结束时会触发一次 ASYNC 派发，而 Spring Security 6.1+ 默认在所有派发类型上
+     * 重新做授权校验。若这里跳过 ASYNC，派发时安全上下文为空，AuthorizationFilter 会抛
+     * AuthorizationDeniedException；此时响应已提交，容器只能强行断开连接（客户端报 chunked 未完整结束）。
+     */
+    @Override
+    protected boolean shouldNotFilterAsyncDispatch() {
+        return false;
+    }
+
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,

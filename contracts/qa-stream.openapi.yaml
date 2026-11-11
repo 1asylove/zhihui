@@ -1,0 +1,129 @@
+openapi: 3.0.3
+info:
+  title: RAG 流式问答接口（SSE）
+  version: 0.1.0
+  description: |
+    「智汇」知识问答流式接口。响应为 text/event-stream，事件顺序：
+    meta（引用片段）→ delta（增量文本，多条）→ done；异常时为 error。
+
+servers:
+  - url: http://localhost:8080
+
+paths:
+  /qa/stream:
+    post:
+      summary: 流式回答（需要 chat:ask 权限）
+      description: |
+        请求体与 POST /qa/ask 相同；参数校验或检索失败发生在建流之前，仍返回普通 JSON 错误。
+        浏览器原生 EventSource 不支持 POST，请用 fetch + ReadableStream 消费。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QaRequest'
+      responses:
+        '200':
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: |
+                  event: meta   data: {"citations":[QaCitation...]}
+                  event: delta  data: <增量文本>
+                  event: done   data: [DONE]
+                  event: error  data: {"message":"..."}
+              example: |
+                event: meta
+                data: {"citations":[{"documentId":13,"chunkIndex":2,"fileName":"zhihui_step4_isolation.txt","score":0.5251,"content":"..."}]}
+
+                event: delta
+                data: 制度由
+
+                event: delta
+                data: 信息技术部负责解释
+
+                event: done
+                data: [DONE]
+        '400':
+          description: question 为空 / 超长 / 请求体缺失（普通 JSON）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '401':
+          description: 未登录或 token 无效
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '403':
+          description: 无 chat:ask 权限
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '502':
+          description: 向量化失败（建流前）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '503':
+          description: 向量库不可用（建流前）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    QaRequest:
+      type: object
+      required:
+        - question
+      properties:
+        question:
+          type: string
+          example: 制度由哪个部门负责解释
+        topK:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+
+    QaCitation:
+      type: object
+      description: 引用片段；数组下标 + 1 即回答中的 [n] 标号
+      properties:
+        documentId:
+          type: integer
+          format: int64
+        chunkIndex:
+          type: integer
+        fileName:
+          type: string
+        score:
+          type: number
+          format: double
+        content:
+          type: string
+
+    Result:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        data:
+          nullable: true

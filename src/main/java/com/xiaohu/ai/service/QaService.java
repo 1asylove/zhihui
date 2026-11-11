@@ -10,6 +10,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,7 +32,7 @@ public class QaService {
             4. 用简洁的中文分点回答。
             """;
 
-    private static final String NO_HIT_ANSWER =
+    public static final String NO_HIT_ANSWER =
             "知识库中未找到与该问题相关的内容。请换一种问法，或先上传相关资料后再试。";
 
     private final SearchService searchService;
@@ -51,7 +52,44 @@ public class QaService {
 
     public QaResponse ask(String question, Integer topK, Long userId, boolean admin) {
         long begin = System.nanoTime();
+        QaPrompt ctx = prepare(question, topK, userId, admin);
 
+        QaResponse resp = new QaResponse();
+        resp.setQuestion(ctx.question());
+        resp.setCitations(ctx.citations());
+
+        if (ctx.empty()) {
+            resp.setAnswer(NO_HIT_ANSWER);
+            resp.setTookMs((System.nanoTime() - begin) / 1_000_000);
+            log.info("问答无命中：question={} 耗时={}ms", ctx.question(), resp.getTookMs());
+            return resp;
+        }
+
+        String answer;
+        try {
+            answer = chatClient.prompt()
+                    .system(SYSTEM_PROMPT)
+                    .user(ctx.userPrompt())
+                    .options(OpenAiChatOptions.builder().temperature(temperature).build())
+                    .call()
+                    .content();
+        } catch (Exception e) {
+            log.warn("模型调用失败：{}", e.getMessage());
+            throw new BizException(502, "模型调用失败：" + e.getMessage());
+        }
+
+        resp.setAnswer(answer);
+        resp.setTookMs((System.nanoTime() - begin) / 1_000_000);
+        log.info("问答完成：question={} 引用={} 耗时={}ms",
+                ctx.question(), ctx.citations().size(), resp.getTookMs());
+        return resp;
+    }
+
+    /**
+     * 流式问答的前置阶段：校验 + 检索 + 组装 Prompt。
+     * 校验/检索失败会抛 BizException，此时尚未开始推流，仍可返回普通 JSON 错误。
+     */
+    public QaPrompt prepare(String question, Integer topK, Long userId, boolean admin) {
         String q = question == null ? "" : question.trim();
         if (q.isEmpty()) {
             throw new BizException(400, "question 不能为空");
@@ -61,39 +99,28 @@ public class QaService {
         SearchResponse search = searchService.search(q, topK, userId, admin);
 
         if (search.getHits().isEmpty()) {
-            QaResponse resp = new QaResponse();
-            resp.setQuestion(q);
-            resp.setAnswer(NO_HIT_ANSWER);
-            resp.setCitations(List.of());
-            resp.setTookMs((System.nanoTime() - begin) / 1_000_000);
-            log.info("问答无命中：question={} 耗时={}ms", q, resp.getTookMs());
-            return resp;
+            return new QaPrompt(q, List.of(), "", true);
         }
 
         // 参与 Prompt 的引用：超出上下文上限的片段会被裁掉，响应里也不返回，保证编号一致
         List<SearchHitVO> cited = new ArrayList<>();
         String userPrompt = buildUserPrompt(q, search.getHits(), cited);
+        return new QaPrompt(q, cited, userPrompt, false);
+    }
 
-        String answer;
-        try {
-            answer = chatClient.prompt()
-                    .system(SYSTEM_PROMPT)
-                    .user(userPrompt)
-                    .options(OpenAiChatOptions.builder().temperature(temperature).build())
-                    .call()
-                    .content();
-        } catch (Exception e) {
-            log.warn("模型调用失败：{}", e.getMessage());
-            throw new BizException(502, "模型调用失败：" + e.getMessage());
-        }
+    /** 流式生成：逐 token 输出，供 SSE 推送 */
+    public Flux<String> streamAnswer(String userPrompt) {
+        return chatClient.prompt()
+                .system(SYSTEM_PROMPT)
+                .user(userPrompt)
+                .options(OpenAiChatOptions.builder().temperature(temperature).build())
+                .stream()
+                .content();
+    }
 
-        QaResponse resp = new QaResponse();
-        resp.setQuestion(q);
-        resp.setAnswer(answer);
-        resp.setCitations(cited);
-        resp.setTookMs((System.nanoTime() - begin) / 1_000_000);
-        log.info("问答完成：question={} 引用={} 耗时={}ms", q, cited.size(), resp.getTookMs());
-        return resp;
+    /** 流式问答的上下文：citations 与 Prompt 一一对应，empty 表示无命中 */
+    public record QaPrompt(String question, List<SearchHitVO> citations, String userPrompt,
+                           boolean empty) {
     }
 
     /**
