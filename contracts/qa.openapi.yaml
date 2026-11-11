@@ -15,6 +15,7 @@ paths:
         复用 POST /search 的检索结果拼接受控 Prompt，调用大模型生成回答。
         引用编号 = citations 数组下标 + 1（citations[0] 对应 [1]）。
         检索无命中时不调用模型，直接返回固定提示与空 citations。
+        带 sessionId 时按会话追问，最近 3 轮对话会注入 Prompt；省略则自动新建会话。
       security:
         - bearerAuth: []
       requestBody:
@@ -90,6 +91,12 @@ components:
           minimum: 1
           maximum: 20
           default: 5
+        sessionId:
+          type: integer
+          format: int64
+          description: |
+            会话 id。省略或为 null 时自动新建会话（title 取问题前 30 字）；
+            传入时会校验属主，不存在/已删除/非本人会话返回 404。
 
     QaCitation:
       type: object
@@ -111,6 +118,10 @@ components:
     QaResponse:
       type: object
       properties:
+        sessionId:
+          type: integer
+          format: int64
+          description: 本次问答所属会话 id（自动新建或沿用请求值）
         question:
           type: string
         answer:

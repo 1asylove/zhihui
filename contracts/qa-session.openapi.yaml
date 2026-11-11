@@ -1,0 +1,200 @@
+openapi: 3.0.3
+info:
+  title: 多轮会话接口
+  version: 0.1.0
+  description: |
+    「智汇」问答会话管理：会话列表、消息历史、逻辑删除。
+    会话与消息由 POST /qa/ask、POST /qa/stream 自动创建；本文件只描述管理接口。
+    所有接口仅能访问当前登录用户自己的会话，越权一律 404。
+
+servers:
+  - url: http://localhost:8080
+
+paths:
+  /sessions:
+    get:
+      summary: 当前用户的会话列表（需要 chat:ask 权限）
+      description: 按 updated_at 倒序返回未删除会话；updated_at 在每次追加消息时刷新。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 会话列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: 成功
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SessionVO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /sessions/{id}/messages:
+    get:
+      summary: 会话消息历史（需要 chat:ask 权限）
+      description: 按消息 id 升序返回；assistant 消息带 citations（与生成时一致）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: 消息列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: 成功
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MessageVO'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: 会话不存在 / 已删除 / 不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+
+  /sessions/{id}:
+    delete:
+      summary: 逻辑删除会话（需要 chat:ask 权限）
+      description: 会话与其消息一并置 deleted=1，列表与详情不再可见。重复删除返回 404。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: 会话不存在 / 已删除 / 不属于当前用户
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: 未登录或 token 无效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Result'
+    Forbidden:
+      description: 无 chat:ask 权限
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Result'
+
+  schemas:
+    SessionVO:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+          description: 首问去空白后的前 30 字
+          example: 制度由哪个部门负责解释
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          description: 最近一次追加消息的时间，列表按此倒序
+
+    MessageVO:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        citations:
+          type: array
+          description: 仅 assistant 消息有值；数组下标 + 1 即回答中的 [n]
+          items:
+            $ref: '#/components/schemas/QaCitation'
+        createdAt:
+          type: string
+          format: date-time
+
+    QaCitation:
+      type: object
+      properties:
+        documentId:
+          type: integer
+          format: int64
+        chunkIndex:
+          type: integer
+        fileName:
+          type: string
+        score:
+          type: number
+          format: double
+        content:
+          type: string
+
+    Result:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        data:
+          nullable: true

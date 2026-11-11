@@ -7,10 +7,14 @@ import java.util.List;
  */
 public class QaResponse {
 
+    private Long sessionId;
     private String question;
     private String answer;
     private List<SearchHitVO> citations;
     private Long tookMs;
+
+    public Long getSessionId() { return sessionId; }
+    public void setSessionId(Long sessionId) { this.sessionId = sessionId; }
 
     public String getQuestion() { return question; }
     public void setQuestion(String question) { this.question = question; }

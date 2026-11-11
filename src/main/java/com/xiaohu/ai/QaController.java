@@ -21,11 +21,12 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 
+import java.util.List;
 import java.util.Map;
 
 /**
- * RAG 问答接口：M4 Step2，非流式。
- * 契约见 contracts/qa.openapi.yaml。
+ * RAG 问答接口：M4 Step2 非流式、Step3 流式、Step4 多轮会话。
+ * 契约见 contracts/qa.openapi.yaml、contracts/qa-stream.openapi.yaml。
  */
 @RestController
 public class QaController {
@@ -49,12 +50,12 @@ public class QaController {
             throw new BizException(400, "请求体不能为空");
         }
         User user = currentUser();
-        return Result.success(
-                qaService.ask(req.getQuestion(), req.getTopK(), user.getId(), isAdmin()));
+        return Result.success(qaService.ask(req.getQuestion(), req.getTopK(), user.getId(),
+                isAdmin(), req.getSessionId()));
     }
 
     /**
-     * 流式问答：meta（引用）→ delta（增量文本）→ done；异常走 error 事件。
+     * 流式问答：meta（会话 + 引用）→ delta（增量文本）→ done；异常走 error 事件。
      * 契约见 contracts/qa-stream.openapi.yaml。
      */
     @PostMapping(value = "/qa/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -66,21 +67,27 @@ public class QaController {
         }
         User user = currentUser();
 
-        // 校验 + 检索 + Prompt 组装仍在建流之前完成，失败时还能返回普通 JSON 错误
+        // 校验 + 会话归属 + 检索 + 落 user 消息 + Prompt 组装仍在建流之前完成
         QaService.QaPrompt ctx = qaService.prepare(req.getQuestion(), req.getTopK(),
-                user.getId(), isAdmin());
+                user.getId(), isAdmin(), req.getSessionId());
 
-        ServerSentEvent<String> meta = event("meta",
-                objectMapper.writeValueAsString(Map.of("citations", ctx.citations())));
+        ServerSentEvent<String> meta = event("meta", objectMapper.writeValueAsString(
+                Map.of("sessionId", ctx.sessionId(), "citations", ctx.citations())));
 
         if (ctx.empty()) {
+            qaService.saveAssistantMessage(ctx.sessionId(), QaService.NO_HIT_ANSWER, List.of());
             return Flux.just(meta,
                     event("delta", QaService.NO_HIT_ANSWER),
                     event("done", "[DONE]"));
         }
 
+        StringBuilder answer = new StringBuilder();
         Flux<ServerSentEvent<String>> deltas = qaService.streamAnswer(ctx.userPrompt())
+                .doOnNext(answer::append)
                 .map(token -> event("delta", token))
+                // 只有正常结束才落 assistant 消息；error 分支不会触发 onComplete
+                .doOnComplete(() -> qaService.saveAssistantMessage(
+                        ctx.sessionId(), answer.toString(), ctx.citations()))
                 .onErrorResume(e -> {
                     log.warn("流式生成失败：{}", e.getMessage());
                     return Flux.just(event("error", "{\"message\":\"模型调用失败，请稍后重试\"}"));

@@ -32,13 +32,13 @@ paths:
               schema:
                 type: string
                 description: |
-                  event: meta   data: {"citations":[QaCitation...]}
+                  event: meta   data: {"sessionId":123,"citations":[QaCitation...]}
                   event: delta  data: <增量文本>
                   event: done   data: [DONE]
                   event: error  data: {"message":"..."}
               example: |
                 event: meta
-                data: {"citations":[{"documentId":13,"chunkIndex":2,"fileName":"zhihui_step4_isolation.txt","score":0.5251,"content":"..."}]}
+                data: {"sessionId":123,"citations":[{"documentId":13,"chunkIndex":2,"fileName":"zhihui_step4_isolation.txt","score":0.5251,"content":"..."}]}
 
                 event: delta
                 data: 制度由
@@ -100,6 +100,12 @@ components:
           minimum: 1
           maximum: 20
           default: 5
+        sessionId:
+          type: integer
+          format: int64
+          description: |
+            会话 id。省略则自动新建，meta 事件返回新 id；
+            传入时校验属主，非本人/已删除会话在建流前返回 404。
 
     QaCitation:
       type: object
