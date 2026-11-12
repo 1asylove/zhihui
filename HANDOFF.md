@@ -264,6 +264,7 @@
 62. **get.docker.com 国内不可直连**：`SSL_connect: Connection reset by peer`。放弃一键脚本，改阿里云镜像 apt 安装 docker-ce
 63. **mirrors.cloud.aliyuncs.com（VPC 内网镜像）会撞同步窗口**：`File has unexpected size ... Mirror sync in progress`。`sed` 换成公网 `mirrors.aliyun.com` 即可
 64. **裸 IP 用浏览器访问要注意 https 自动升级**：新版浏览器对裸输的 IP 会先尝试 https（443 无证书 →"页面打不开"），但 curl 走 http 完全正常。排查先分清"浏览器打不开"还是"服务不通"；另外观察到 `GET /` 返回 307 → `/index.html`（Server: nginx/1.27.5，配置里并无重定向），链路最终 200 正常，**原因待查**
+65. **网站突然全不通先查实例状态，再查安全组端口**：2026-11-13 网站无法访问，排查路径：本机 curl 80/22 均超时 → 控制台实例「运行中」→ 22 恢复通但 80 不通 → 服务器内 `curl 127.0.0.1` 返回 200 + `ss -tlnp` 确认 0.0.0.0:80 监听 → 锁定安全组。根因：**安全组入方向只有 SSH(22)/RDP(3389)/ICMP，没有 80 规则**（此前能访问说明规则曾被删或未加成功）。修复：手动添加 TCP 80/80、源 0.0.0.0/0，立即生效。教训：①22 通 80 不通 = 端口级拦截，直奔安全组；②ECS 意外重启后 Docker 容器靠 compose 重启策略自动拉起，服务本身无需干预；③新建安全组规则时「访问来源」填 IP（0.0.0.0/0），「访问目的」才填端口（80/80），填串会报 IPv4 格式错误
 
 ## 环境要点
 - Spring Boot 3.5.0；Spring AI 1.0.0；MyBatis-Plus `mybatis-plus-spring-boot3-starter:3.5.17`；MySQL 8.0.40；jjwt 0.12.6；pdfbox 3.0.4；poi-ooxml 5.5.1；Java 17
@@ -317,6 +318,7 @@
 - ✅ `docker compose ps` 全 Up；`Started AiApplication`；`curl POST /auth/login` 返回 code 200（后端+DB+Nginx 链路通）
 - ✅ 本机 `curl http://47.114.49.129` 拿到前端 HTML（标题「智汇 · 智能知识中枢」）
 - ⚠️ 浏览器登录页曾打开但报 401（curl 证明后端正常，高度疑密码输入问题/中文输入法）；之后用户反馈「页面打不开」（疑浏览器 https 自动升级，见坑 64），curl 一切正常
+- ✅ 2026-11-13 排障恢复：网站全不通，根因为**安全组缺 80 端口入方向规则**（实例曾意外重启，Docker 容器自动拉起无影响），手动添加 TCP 80/80 + 0.0.0.0/0 后外部访问恢复（HTTP 200），详见坑 65
 - ⬜ 待做：浏览器全流程验收（登录→问答 SSE+引用→文档管理→数据看板）；swap 写入 `/etc/fstab`；确认 GitHub 仓库已改回 private + 撤销 `ghp_` PAT；提交 HANDOFF
 
 **运维速查**
