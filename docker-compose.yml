@@ -1,0 +1,78 @@
+# 「智汇」单机全栈编排：mysql + python×2 + java + nginx
+# 密钥在 .env（compose 自动读取，.env 已被 gitignore，勿提交真实值）
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: zhihui-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ai_kb
+      TZ: Asia/Shanghai
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # 仅空库首次启动执行；改 sql 需 down -v 清 volume 后重来
+      - ./deploy/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  python-vectorize:
+    build: ./python
+    container_name: zhihui-python-vectorize
+    environment:
+      PORT: "8000"
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY}
+    restart: unless-stopped
+
+  python-agent:
+    build: ./python
+    container_name: zhihui-python-agent
+    environment:
+      PORT: "8100"
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY}
+      # 容器内回调 Java 走服务名（运行时才调，不做启动依赖，避免与 java 循环依赖）
+      JAVA_BASE_URL: http://java:8080
+    restart: unless-stopped
+
+  java:
+    build: .
+    container_name: zhihui-java
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/ai_kb?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY}
+      MILVUS_TOKEN: ${MILVUS_TOKEN}
+      VECTORIZE_BASE_URL: http://python-vectorize:8000
+      AGENT_BASE_URL: http://python-agent:8100
+      UPLOAD_DIR: /data/uploads
+      # 4G 内存保护：限制 JVM 堆
+      JAVA_TOOL_OPTIONS: -Xmx768m
+    volumes:
+      - upload_data:/data/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      python-vectorize:
+        condition: service_started
+      python-agent:
+        condition: service_started
+    restart: unless-stopped
+
+  nginx:
+    build: ./web
+    container_name: zhihui-nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - java
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  upload_data:
