@@ -11,7 +11,9 @@ export default defineConfig({
       '/sessions': 'http://127.0.0.1:8080',
       '/agent': 'http://127.0.0.1:8080',
       '/qa': 'http://127.0.0.1:8080',
-      '/search': 'http://127.0.0.1:8080'
+      '/search': 'http://127.0.0.1:8080',
+      '/documents': 'http://127.0.0.1:8080',
+      '/charts': 'http://127.0.0.1:8080'
     }
   }
 })

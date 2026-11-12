@@ -1,0 +1,58 @@
+openapi: 3.0.3
+info:
+  title: 智汇 - 数据看板契约
+  version: 1.0.0
+  description: 首页看板聚合统计，规格见 specs/chart/dashboard-stats.md
+paths:
+  /charts/overview:
+    get:
+      summary: 首页看板聚合统计
+      description: ADMIN 返回全量统计，USER 只统计自己上传的文档与自己的会话。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 统计结果（Result 信封，code=200）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer, example: 200 }
+                  message: { type: string, example: success }
+                  data: { $ref: '#/components/schemas/ChartOverview' }
+        '401':
+          description: 未登录或 token 失效
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    NameCount:
+      type: object
+      properties:
+        name: { type: string, example: txt }
+        count: { type: integer, format: int64, example: 3 }
+    DateCount:
+      type: object
+      properties:
+        date: { type: string, example: '2026-11-12' }
+        count: { type: integer, format: int64, example: 2 }
+    ChartOverview:
+      type: object
+      properties:
+        totalDocuments: { type: integer, format: int64, example: 5 }
+        successDocuments: { type: integer, format: int64, example: 4 }
+        failedDocuments: { type: integer, format: int64, example: 1 }
+        processingDocuments: { type: integer, format: int64, example: 0 }
+        chunkCount: { type: integer, format: int64, example: 12 }
+        sessionCount: { type: integer, format: int64, example: 3 }
+        typeDistribution:
+          type: array
+          items: { $ref: '#/components/schemas/NameCount' }
+        recentUploads:
+          type: array
+          description: 固定 7 个元素，无数据的日期 count=0
+          items: { $ref: '#/components/schemas/DateCount' }

@@ -21,6 +21,8 @@
       </div>
       <div class="side-footer">
         <span>{{ username }}</span>
+        <router-link to="/dashboard">数据看板</router-link>
+        <router-link to="/docs">文档管理</router-link>
         <a href="javascript:;" @click="logout">退出</a>
       </div>
     </aside>
@@ -258,8 +260,8 @@ async function send() {
 .session-item .del:hover { color: #ff7875; }
 .empty { color: #7d96b5; font-size: 12px; text-align: center; margin-top: 24px; padding: 0 12px; }
 .side-footer {
-  display: flex; justify-content: space-between; padding: 14px 16px;
-  border-top: 1px solid #2a4a73; font-size: 13px;
+  display: flex; justify-content: space-between; align-items: center; padding: 14px 16px;
+  border-top: 1px solid #2a4a73; font-size: 13px; gap: 8px;
 }
 .side-footer a { color: #8ab4e0; text-decoration: none; }
 

@@ -36,7 +36,32 @@ export const api = {
   listSessions: () => request('/sessions'),
   sessionMessages: (id) => request(`/sessions/${id}/messages`),
   deleteSession: (id) => request(`/sessions/${id}`, { method: 'DELETE' }),
-  agentChat: (payload) => request('/agent/chat', { method: 'POST', body: payload })
+  agentChat: (payload) => request('/agent/chat', { method: 'POST', body: payload }),
+  listDocuments: (page = 1, size = 10) => request(`/documents?page=${page}&size=${size}`),
+  deleteDocument: (id) => request(`/documents/${id}`, { method: 'DELETE' }),
+  chartOverview: () => request('/charts/overview')
+}
+
+// 上传文档：multipart 不能走 request()（它会强制 JSON 头）
+// 注意：后端上传是同步的，解析+切片+向量化全做完才返回，大文件可能要等几十秒
+export async function uploadDocument(file) {
+  const token = localStorage.getItem('token')
+  const form = new FormData()
+  form.append('file', file)
+  const resp = await fetch('/documents/upload', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form
+  })
+  if (resp.status === 401) {
+    localStorage.removeItem('token')
+    window.location.href = '/login'
+    throw new ApiError(401, '登录已过期，请重新登录')
+  }
+  const json = await resp.json().catch(() => null)
+  if (!json) throw new ApiError(resp.status, `HTTP ${resp.status}`)
+  if (json.code !== 200) throw new ApiError(json.code, json.message || '上传失败')
+  return json.data
 }
 
 // 流式问答（/qa/stream，SSE）。onEvent(eventName, dataString)
