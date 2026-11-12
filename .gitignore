@@ -49,8 +49,7 @@ application-local.yaml
 .DS_Store
 Thumbs.db
 
-### AI 过程/交接文档（本地保留，不提交）###
-HANDOFF.md
+### AI 过程文档（本地保留，不提交；HANDOFF.md 已脱密，作为项目记忆正常提交）###
 MIGRATION_PLAN.md
 PROGRESS.md
 
