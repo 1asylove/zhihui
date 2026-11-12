@@ -1,0 +1,310 @@
+openapi: 3.0.3
+info:
+  title: Agent 问答接口
+  version: 0.1.0
+  description: |
+    「智汇」M5 Agent 问答。Java 侧 `/agent/chat` 为统一入口，Python 侧
+    `/internal/agent/chat` 为内部服务（LangGraph 单 Agent）。
+
+    权限、会话、数据访问全部在 Java；Python 无状态，只通过 HTTP 工具调用
+    Java 的 `/search` 与 `/qa/ask`。用户 JWT 由 Java 原样透传给 Python。
+
+servers:
+  - url: http://localhost:8080
+    description: Java 服务
+  - url: http://127.0.0.1:8100
+    description: Python Agent 服务（仅内部调用）
+
+tags:
+  - name: agent
+    description: Java 对外统一入口
+  - name: internal
+    description: Java → Python 内部接口
+
+paths:
+  /agent/chat:
+    post:
+      tags: [agent]
+      summary: Agent 问答（需要 chat:ask 权限）
+      description: |
+        统一入口：创建/校验会话 → 落 user 消息 → 调用 Python Agent →
+        落 assistant 消息 → 返回回答与引用。
+
+        - Python 连接失败 / 超时 / 5xx 时降级为 Java 本地 `/qa/ask` 流程，
+          返回 200 且 `degraded=true`、`route=fallback`
+        - `sessionId` 省略则自动新建；传入时校验属主，越权/不存在/已删除一律 404
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentChatRequest'
+      responses:
+        '200':
+          description: 回答与引用（含降级标记）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultAgentChatResponse'
+        '400':
+          description: question 为空 / 超长 / mode 非法 / 请求体缺失
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: 会话不存在 / 已删除 / 非本人会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Result'
+
+  /internal/agent/chat:
+    post:
+      tags: [internal]
+      summary: Python Agent 执行（仅 Java 内部调用）
+      description: |
+        由 Java 网关调用，必须携带用户 JWT（`Authorization: Bearer <token>`）。
+        携带 `history`（Java 已按 3 轮 / 1200 字裁剪），Python 不再二次裁剪。
+        返回体不含 sessionId，会话由 Java 维护。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InternalAgentChatRequest'
+      responses:
+        '200':
+          description: Agent 执行结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalAgentChatResponse'
+        '400':
+          description: 参数非法（question 为空等）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 缺少或无效的 Authorization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: 图执行超时（Java 侧据此降级）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: 未登录或 token 无效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Result'
+    Forbidden:
+      description: 无 chat:ask 权限
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Result'
+
+  schemas:
+    AgentChatRequest:
+      type: object
+      required:
+        - question
+      properties:
+        question:
+          type: string
+          description: 用户问题，去首尾空白后不可为空，长度 ≤ search.max-query-length（默认 500）
+          example: 制度由哪个部门负责解释
+        sessionId:
+          type: integer
+          format: int64
+          description: 会话 id；省略自动新建，传入时校验属主
+        topK:
+          type: integer
+          description: 检索片段数，缺省 5，夹紧到 [1, 20]
+          minimum: 1
+          maximum: 20
+          default: 5
+        mode:
+          type: string
+          enum: [vector, keyword, hybrid]
+          description: 检索模式，缺省取 search.mode（默认 hybrid）
+
+    AgentCitation:
+      type: object
+      description: 引用片段；数组下标 + 1 即回答中的 [n] 标号
+      properties:
+        documentId:
+          type: integer
+          format: int64
+        chunkIndex:
+          type: integer
+        fileName:
+          type: string
+        score:
+          type: number
+          format: double
+          description: 语义随检索模式变化，仅用于排序展示
+        content:
+          type: string
+
+    ToolUsage:
+      type: object
+      properties:
+        name:
+          type: string
+          enum: [search_knowledge, rag_answer]
+        ok:
+          type: boolean
+          description: 工具是否调用成功；false 表示失败但主流程继续
+        hitCount:
+          type: integer
+          description: 命中条数（rag_answer 为 citations 条数）
+        tookMs:
+          type: integer
+          format: int64
+
+    AgentChatResponse:
+      type: object
+      properties:
+        sessionId:
+          type: integer
+          format: int64
+        question:
+          type: string
+        answer:
+          type: string
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentCitation'
+        route:
+          type: string
+          enum: [chitchat, knowledge, fallback]
+          description: |
+            chitchat=直接回答；knowledge=调用了工具；fallback=Python 不可用，
+            已降级到 Java 本地问答
+        toolsUsed:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolUsage'
+        degraded:
+          type: boolean
+          description: 是否发生降级（true 时 route=fallback）
+        tookMs:
+          type: integer
+          format: int64
+
+    ResultAgentChatResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: 成功
+        data:
+          $ref: '#/components/schemas/AgentChatResponse'
+
+    InternalAgentChatRequest:
+      type: object
+      required:
+        - question
+        - userId
+        - admin
+        - history
+      properties:
+        sessionId:
+          type: integer
+          format: int64
+          description: 仅用于日志追踪
+        question:
+          type: string
+        userId:
+          type: integer
+          format: int64
+        admin:
+          type: boolean
+          description: 是否为管理员（决定工具侧可见范围，仅用于日志与工具默认值）
+        topK:
+          type: integer
+          default: 5
+        mode:
+          type: string
+          enum: [vector, keyword, hybrid]
+        history:
+          type: array
+          description: Java 已裁剪的历史消息（最近 3 轮 / 1200 字）
+          items:
+            $ref: '#/components/schemas/HistoryMessage'
+
+    HistoryMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+
+    InternalAgentChatResponse:
+      type: object
+      properties:
+        answer:
+          type: string
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentCitation'
+        route:
+          type: string
+          enum: [chitchat, knowledge]
+        toolsUsed:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolUsage'
+        tookMs:
+          type: integer
+          format: int64
+
+    Error:
+      type: object
+      description: Python 侧错误体（FastAPI HTTPException 格式）
+      properties:
+        detail:
+          type: string
+
+    Result:
+      type: object
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        data:
+          nullable: true

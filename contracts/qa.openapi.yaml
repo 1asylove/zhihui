@@ -16,6 +16,7 @@ paths:
         引用编号 = citations 数组下标 + 1（citations[0] 对应 [1]）。
         检索无命中时不调用模型，直接返回固定提示与空 citations。
         带 sessionId 时按会话追问，最近 3 轮对话会注入 Prompt；省略则自动新建会话。
+        传 persist=false 时只做「检索 + 生成」，不建会话、不写消息（Agent 工具内部调用用）。
       security:
         - bearerAuth: []
       requestBody:
@@ -97,6 +98,12 @@ components:
           description: |
             会话 id。省略或为 null 时自动新建会话（title 取问题前 30 字）；
             传入时会校验属主，不存在/已删除/非本人会话返回 404。
+        persist:
+          type: boolean
+          default: true
+          description: |
+            是否落库（建会话 / 写 chat_message）。供 Agent 工具内部调用时传 false，
+            避免与 Java 网关的落库重复。false 时忽略 sessionId 自动建会话行为。
 
     QaCitation:
       type: object

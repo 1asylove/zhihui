@@ -1,3 +1,6 @@
 fastapi
 uvicorn[standard]
 httpx
+# M5 Agent（Python 侧 LangGraph 编排）
+langgraph==1.2.20
+langchain-openai==1.7.4

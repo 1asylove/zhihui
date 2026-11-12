@@ -51,7 +51,7 @@ public class QaController {
         }
         User user = currentUser();
         return Result.success(qaService.ask(req.getQuestion(), req.getTopK(), user.getId(),
-                isAdmin(), req.getSessionId()));
+                isAdmin(), req.getSessionId(), !Boolean.FALSE.equals(req.getPersist())));
     }
 
     /**

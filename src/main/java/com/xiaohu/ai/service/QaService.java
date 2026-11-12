@@ -60,8 +60,18 @@ public class QaService {
      */
     public QaResponse ask(String question, Integer topK, Long userId, boolean admin,
                           Long sessionId) {
+        return ask(question, topK, userId, admin, sessionId, true);
+    }
+
+    /**
+     * 非流式问答。sessionId 为空自动建会话；user 消息在调模型前落库，
+     * assistant 消息在成功后落库（模型失败只留 user 消息）。
+     * persist=false 时不建会话、不写消息，供 Agent 工具内部调用。
+     */
+    public QaResponse ask(String question, Integer topK, Long userId, boolean admin,
+                          Long sessionId, boolean persist) {
         long begin = System.nanoTime();
-        QaPrompt ctx = prepare(question, topK, userId, admin, sessionId);
+        QaPrompt ctx = prepare(question, topK, userId, admin, sessionId, persist);
 
         QaResponse resp = new QaResponse();
         resp.setSessionId(ctx.sessionId());
@@ -70,7 +80,9 @@ public class QaService {
 
         if (ctx.empty()) {
             resp.setAnswer(NO_HIT_ANSWER);
-            saveAssistantMessage(ctx.sessionId(), NO_HIT_ANSWER, List.of());
+            if (ctx.persist()) {
+                saveAssistantMessage(ctx.sessionId(), NO_HIT_ANSWER, List.of());
+            }
             resp.setTookMs((System.nanoTime() - begin) / 1_000_000);
             log.info("问答无命中：sessionId={} question={} 耗时={}ms",
                     ctx.sessionId(), ctx.question(), resp.getTookMs());
@@ -91,7 +103,9 @@ public class QaService {
         }
 
         resp.setAnswer(answer);
-        saveAssistantMessage(ctx.sessionId(), answer, ctx.citations());
+        if (ctx.persist()) {
+            saveAssistantMessage(ctx.sessionId(), answer, ctx.citations());
+        }
         resp.setTookMs((System.nanoTime() - begin) / 1_000_000);
         log.info("问答完成：sessionId={} question={} 引用={} 耗时={}ms",
                 ctx.sessionId(), ctx.question(), ctx.citations().size(), resp.getTookMs());
@@ -104,32 +118,43 @@ public class QaService {
      */
     public QaPrompt prepare(String question, Integer topK, Long userId, boolean admin,
                             Long sessionId) {
+        return prepare(question, topK, userId, admin, sessionId, true);
+    }
+
+    public QaPrompt prepare(String question, Integer topK, Long userId, boolean admin,
+                            Long sessionId, boolean persist) {
         String q = question == null ? "" : question.trim();
         if (q.isEmpty()) {
             throw new BizException(400, "question 不能为空");
         }
 
-        // 会话归属先校验：越权/已删在建流前就返回 404
-        Long sid = chatHistoryService.resolveSession(sessionId, userId, q);
-
-        // 先取历史（此时还没写入本次问题），再查资料、落 user 消息
-        List<ChatMessage> history = chatHistoryService.recentMessages(sid);
-        String historyBlock = chatHistoryService.formatHistory(history);
+        Long sid = sessionId;
+        List<ChatMessage> history = List.of();
+        String historyBlock = "";
+        if (persist) {
+            // 会话归属先校验：越权/已删在建流前就返回 404
+            sid = chatHistoryService.resolveSession(sessionId, userId, q);
+            // 先取历史（此时还没写入本次问题），再查资料、落 user 消息
+            history = chatHistoryService.recentMessages(sid);
+            historyBlock = chatHistoryService.formatHistory(history);
+        }
 
         // 长度校验、权限过滤、回表兜底都由 SearchService 统一负责
         SearchResponse search = searchService.search(q, topK, userId, admin);
-        chatHistoryService.appendUserMessage(sid, q);
-        log.info("问答准备：sessionId={} 历史消息={}条 命中={}条",
-                sid, history.size(), search.getHits().size());
+        if (persist) {
+            chatHistoryService.appendUserMessage(sid, q);
+        }
+        log.info("问答准备：sessionId={} persist={} 历史消息={}条 命中={}条",
+                sid, persist, history.size(), search.getHits().size());
 
         if (search.getHits().isEmpty()) {
-            return new QaPrompt(q, List.of(), "", true, sid);
+            return new QaPrompt(q, List.of(), "", true, sid, persist);
         }
 
         // 参与 Prompt 的引用：超出上下文上限的片段会被裁掉，响应里也不返回，保证编号一致
         List<SearchHitVO> cited = new ArrayList<>();
         String userPrompt = buildUserPrompt(historyBlock, q, search.getHits(), cited);
-        return new QaPrompt(q, cited, userPrompt, false, sid);
+        return new QaPrompt(q, cited, userPrompt, false, sid, persist);
     }
 
     /** 流式生成：逐 token 输出，供 SSE 推送 */
@@ -150,7 +175,7 @@ public class QaService {
 
     /** 问答上下文：citations 与 Prompt 一一对应，empty 表示无命中 */
     public record QaPrompt(String question, List<SearchHitVO> citations, String userPrompt,
-                           boolean empty, Long sessionId) {
+                           boolean empty, Long sessionId, boolean persist) {
     }
 
     /**
